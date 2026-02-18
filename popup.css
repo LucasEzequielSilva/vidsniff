@@ -1,0 +1,466 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 440px;
+  max-height: 560px;
+  overflow-y: auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  background: #111118;
+  color: #e0e0e0;
+}
+
+/* Scrollbar */
+body::-webkit-scrollbar {
+  width: 5px;
+}
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+body::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+body::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #16161e;
+  border-bottom: 1px solid #252530;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #a29bfe;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Buttons */
+.btn-small {
+  padding: 5px 12px;
+  border: 1px solid rgba(108, 92, 231, 0.4);
+  border-radius: 6px;
+  background: rgba(108, 92, 231, 0.1);
+  color: #a29bfe;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-small:hover {
+  background: #6c5ce7;
+  border-color: #6c5ce7;
+  color: #fff;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #2a2a36;
+  border-radius: 6px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-icon:hover {
+  background: #252530;
+  color: #ccc;
+  border-color: #444;
+}
+
+/* Stream Groups */
+.group {
+  padding: 6px 10px 2px;
+}
+
+.group-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #555;
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+
+/* Stream Items - Card style with thumbnail */
+.stream-item {
+  display: flex;
+  gap: 10px;
+  background: #1a1a24;
+  border: 1px solid #252530;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 6px;
+  transition: all 0.15s;
+  cursor: default;
+}
+.stream-item:hover {
+  border-color: #6c5ce740;
+  background: #1e1e2a;
+}
+
+/* Thumbnail */
+.stream-thumb {
+  flex-shrink: 0;
+  width: 120px;
+  height: 68px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #252530;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.stream-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stream-thumb .thumb-placeholder {
+  color: #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stream-thumb .duration-badge {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.stream-thumb .type-overlay {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Stream Info (right side) */
+.stream-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.stream-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.stream-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.stream-site {
+  font-size: 10px;
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-size {
+  font-size: 10px;
+  color: #888;
+  flex-shrink: 0;
+  background: #252530;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Type badges */
+.type-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.type-badge.video, .type-overlay.video { background: #00b894; color: #fff; }
+.type-badge.hls, .type-overlay.hls { background: #e17055; color: #fff; }
+.type-badge.mpd, .type-overlay.mpd { background: #fdcb6e; color: #1a1a24; }
+.type-badge.audio, .type-overlay.audio { background: #74b9ff; color: #1a1a24; }
+.type-badge.segment, .type-overlay.segment { background: #636e72; color: #fff; }
+
+/* Action buttons */
+.stream-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.stream-actions button {
+  padding: 3px 8px;
+  border: none;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.2px;
+}
+.stream-actions button:hover {
+  filter: brightness(1.15);
+  transform: translateY(-0.5px);
+}
+.stream-actions button:active {
+  transform: translateY(0);
+}
+
+.btn-download {
+  background: #6c5ce7;
+  color: #fff;
+}
+.btn-copy {
+  background: #2d2d3a;
+  color: #bbb;
+  border: 1px solid #3a3a4a !important;
+}
+.btn-copy:hover {
+  color: #fff;
+}
+.btn-ytdlp {
+  background: #d63031;
+  color: #fff;
+}
+.btn-ffmpeg {
+  background: #e17055;
+  color: #fff;
+}
+
+/* Empty State */
+.empty {
+  text-align: center;
+  padding: 52px 24px;
+  color: #666;
+}
+.empty-icon {
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+.empty p {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.empty .hint {
+  font-size: 11px;
+  color: #555;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #6c5ce7;
+  color: #fff;
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 100;
+  transition: opacity 0.3s;
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.4);
+}
+.toast.fade-out {
+  opacity: 0;
+}
+
+/* Download Progress */
+.download-progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 0 2px;
+  border-top: 1px solid #252530;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #252530;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill.done {
+  background: linear-gradient(90deg, #00b894, #55efc4);
+}
+
+.progress-fill.error {
+  background: #d63031;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.progress-text {
+  font-size: 10px;
+  color: #999;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.btn-cancel:hover {
+  background: #d63031;
+  color: #fff;
+}
+
+/* Stream item with progress or picker needs flex-wrap */
+.stream-item:has(.download-progress),
+.stream-item:has(.quality-picker) {
+  flex-wrap: wrap;
+}
+
+/* Quality Picker */
+.quality-picker {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 0 2px;
+  border-top: 1px solid #252530;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.quality-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.quality-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.quality-btn {
+  padding: 4px 10px;
+  border: 1px solid #3a3a4a;
+  border-radius: 4px;
+  background: #252530;
+  color: #ccc;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quality-btn:first-child {
+  border-color: #6c5ce7;
+  color: #a29bfe;
+}
+
+.quality-btn:hover {
+  background: #6c5ce7;
+  border-color: #6c5ce7;
+  color: #fff;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.stream-item {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.download-progress.fade-out {
+  opacity: 0;
+  transition: opacity 0.3s;
+}

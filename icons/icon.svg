@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect width="128" height="128" rx="20" fill="#1a1a2e"/>
+  <rect x="4" y="4" width="120" height="120" rx="17" fill="#16213e" stroke="#6c5ce7" stroke-width="3"/>
+  <!-- Play triangle -->
+  <path d="M48 36 L92 64 L48 92Z" fill="#6c5ce7"/>
+  <!-- Sniff waves -->
+  <path d="M78 44 Q90 44 94 36" stroke="#a29bfe" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M78 44 Q94 44 102 32" stroke="#a29bfe" stroke-width="3.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M78 44 Q98 44 108 28" stroke="#a29bfe" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <!-- Download arrow -->
+  <path d="M64 98 L64 112" stroke="#00b894" stroke-width="4" stroke-linecap="round"/>
+  <path d="M56 106 L64 114 L72 106" stroke="#00b894" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
