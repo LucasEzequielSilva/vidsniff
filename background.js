@@ -17,6 +17,50 @@ const DASH_MIMES = /^application\/dash\+xml/i;
 // Minimum size to filter out tracking pixels and tiny files (10KB)
 const MIN_SIZE_BYTES = 10240;
 
+// Domains that are NOT video sources - payment processors, analytics, ads, etc.
+const BLOCKED_DOMAINS = [
+  "stripe.com",
+  "js.stripe.com",
+  "m.stripe.network",
+  "stripe.network",
+  "paypal.com",
+  "googlesyndication.com",
+  "doubleclick.net",
+  "google-analytics.com",
+  "googletagmanager.com",
+  "facebook.net",
+  "facebook.com",
+  "analytics.",
+  "sentry.io",
+  "hotjar.com",
+  "intercom.io",
+  "crisp.chat",
+  "tawk.to",
+  "newrelic.com",
+  "nr-data.net",
+  "segment.io",
+  "segment.com",
+  "mixpanel.com",
+  "amplitude.com",
+  "heapanalytics.com",
+  "fullstory.com",
+  "mouseflow.com",
+  "clarity.ms",
+  "adroll.com",
+  "adsrvr.org",
+];
+
+function isBlockedDomain(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return BLOCKED_DOMAINS.some(
+      (d) => hostname === d || hostname.endsWith("." + d)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Per-tab detected streams: { tabId: { url: streamInfo } }
 const tabStreams = new Map();
 // Per-tab request headers cache: { tabId: { requestId: headers } }
@@ -143,6 +187,7 @@ function addStream(tabId, streamInfo) {
 
   if (url.startsWith("data:") || url.startsWith("blob:")) return;
   if (url.startsWith("chrome-extension://")) return;
+  if (isBlockedDomain(url)) return;
 
   streamInfo.displayName = deriveStreamName(url, tabId, streamInfo.type);
 
@@ -249,6 +294,7 @@ chrome.webRequest.onSendHeaders.addListener(
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
+    if (isBlockedDomain(details.url)) return;
     const type = classifyByUrl(details.url);
     if (!type) return;
 
@@ -271,6 +317,7 @@ chrome.webRequest.onBeforeRequest.addListener(
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (details.tabId < 0) return;
+    if (isBlockedDomain(details.url)) return;
 
     const contentTypeHeader = (details.responseHeaders || []).find(
       (h) => h.name.toLowerCase() === "content-type"
@@ -340,13 +387,22 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   )
     return;
 
-  const tabId = details.tabId;
+  clearTabData(details.tabId);
+});
+
+// SPA navigation (pushState/replaceState) - critical for sites like Skool
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+  if (details.frameId !== 0) return;
+  clearTabData(details.tabId);
+});
+
+function clearTabData(tabId) {
   tabStreams.delete(tabId);
   tabHeaders.delete(tabId);
   tabMeta.delete(tabId);
   chrome.storage.session.remove([`tab_${tabId}`, `meta_${tabId}`]);
   updateBadge(tabId);
-});
+}
 
 // --- Message Handling ---
 

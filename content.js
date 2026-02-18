@@ -7,14 +7,58 @@
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
 
-  const reportedUrls = new Set();
+  // Domains that are NOT video sources
+  const BLOCKED_DOMAINS = [
+    "stripe.com", "js.stripe.com", "m.stripe.network", "stripe.network",
+    "paypal.com", "googlesyndication.com", "doubleclick.net",
+    "google-analytics.com", "googletagmanager.com", "facebook.net",
+    "facebook.com", "sentry.io", "hotjar.com", "intercom.io",
+    "crisp.chat", "tawk.to", "newrelic.com", "nr-data.net",
+    "segment.io", "segment.com", "mixpanel.com", "amplitude.com",
+  ];
+
+  function isBlockedUrl(url) {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return BLOCKED_DOMAINS.some(
+        (d) => hostname === d || hostname.endsWith("." + d)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  let reportedUrls = new Set();
   let pageMetadata = null;
+  let lastUrl = location.href;
+
+  // --- SPA URL change detection ---
+  // Skool and similar SPAs change URL via pushState without full navigation
+
+  function checkUrlChange() {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      // Reset everything for the new "page"
+      reportedUrls = new Set();
+      pageMetadata = null;
+      // Give the new page content time to load
+      setTimeout(scanMediaElements, 1000);
+      setTimeout(scanMediaElements, 3000);
+    }
+  }
+
+  // Poll for URL changes (catches pushState, replaceState, and hash changes)
+  setInterval(checkUrlChange, 800);
+  window.addEventListener("popstate", checkUrlChange);
 
   // --- Extract page metadata for meaningful names ---
 
   function getPageMetadata() {
-    if (pageMetadata) return pageMetadata;
+    if (pageMetadata && pageMetadata.pageUrl === location.href) {
+      return pageMetadata;
+    }
 
+    // Force re-read for current page
     const title =
       document.querySelector('meta[property="og:title"]')?.content ||
       document.querySelector('meta[name="twitter:title"]')?.content ||
@@ -50,8 +94,10 @@
     // Check poster attribute
     if (videoEl.poster) return videoEl.poster;
 
-    // Check parent containers for background images or nearby imgs
-    const container = videoEl.closest("[data-poster], [style*='background-image']");
+    // Check parent containers for background images
+    const container = videoEl.closest(
+      "[data-poster], [style*='background-image']"
+    );
     if (container) {
       const bg = getComputedStyle(container).backgroundImage;
       const match = bg?.match(/url\(["']?(.+?)["']?\)/);
@@ -63,9 +109,8 @@
       if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
         const canvas = document.createElement("canvas");
         canvas.width = Math.min(videoEl.videoWidth, 320);
-        canvas.height = Math.min(
-          videoEl.videoHeight,
-          Math.round((320 * videoEl.videoHeight) / videoEl.videoWidth)
+        canvas.height = Math.round(
+          (canvas.width * videoEl.videoHeight) / videoEl.videoWidth
         );
         const ctx = canvas.getContext("2d");
         ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
@@ -80,8 +125,10 @@
 
   function getVideoDuration(videoEl) {
     if (!videoEl) return null;
-    if (videoEl.duration && isFinite(videoEl.duration)) {
-      return Math.round(videoEl.duration);
+    const dur = videoEl.duration;
+    // Only return if it's a real duration (> 1 second, finite)
+    if (dur && isFinite(dur) && dur > 1) {
+      return Math.round(dur);
     }
     return null;
   }
@@ -89,6 +136,7 @@
   function reportUrl(url, source, extraMeta) {
     if (!url || reportedUrls.has(url)) return;
     if (url.startsWith("blob:") || url.startsWith("data:")) return;
+    if (isBlockedUrl(url)) return;
 
     reportedUrls.add(url);
 
@@ -109,7 +157,7 @@
   // --- DOM Scanning ---
 
   function scanMediaElements() {
-    // Update page metadata on each scan
+    // Always re-read metadata fresh
     pageMetadata = null;
     getPageMetadata();
 
@@ -121,6 +169,8 @@
       if (src && STREAM_PATTERN.test(src)) {
         try {
           const absolute = new URL(src, document.baseURI).href;
+          if (isBlockedUrl(absolute)) continue;
+
           const videoEl =
             el.tagName === "VIDEO"
               ? el
@@ -141,11 +191,13 @@
       }
     }
 
-    // Check <video> elements with source children
+    // Check <video>/<audio> elements with currentSrc
     for (const video of document.querySelectorAll("video, audio")) {
       if (video.currentSrc && STREAM_PATTERN.test(video.currentSrc)) {
         try {
           const absolute = new URL(video.currentSrc, document.baseURI).href;
+          if (isBlockedUrl(absolute)) continue;
+
           const extraMeta = {};
           if (video.tagName === "VIDEO") {
             const thumb = getVideoThumbnail(video);
@@ -158,7 +210,7 @@
       }
     }
 
-    // Also try to grab thumbnail from any video on page for HLS/network streams
+    // Send thumbnail/duration update for streams detected via network
     sendThumbnailUpdate();
   }
 
@@ -245,7 +297,7 @@
     }
   });
 
-  // --- Listen for thumbnail capture requests from popup ---
+  // --- Listen for messages from popup/background ---
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "captureVideoThumbnail") {
@@ -265,6 +317,7 @@
     }
 
     if (message.action === "getPageMetadata") {
+      pageMetadata = null; // Force fresh read
       const meta = getPageMetadata();
       const videos = document.querySelectorAll("video");
       let thumb = meta.thumbnail;
@@ -272,12 +325,18 @@
 
       for (const v of videos) {
         const t = getVideoThumbnail(v);
-        if (t) { thumb = t; break; }
+        if (t) {
+          thumb = t;
+          break;
+        }
       }
 
       for (const v of videos) {
         const d = getVideoDuration(v);
-        if (d) { duration = d; break; }
+        if (d) {
+          duration = d;
+          break;
+        }
       }
 
       sendResponse({
