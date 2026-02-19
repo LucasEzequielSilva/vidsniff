@@ -5,6 +5,7 @@ const emptyState = document.getElementById("empty");
 const copyAllBtn = document.getElementById("copyAll");
 const refreshBtn = document.getElementById("refresh");
 const toast = document.getElementById("toast");
+const streamCountEl = document.getElementById("streamCount");
 
 let currentStreams = {};
 let currentTab = null;
@@ -113,6 +114,10 @@ function render(streams, meta) {
 
   emptyState.hidden = true;
   copyAllBtn.style.display = "";
+
+  // Show stream count badge in header
+  streamCountEl.textContent = filtered.length;
+  streamCountEl.hidden = false;
   streamsContainer.innerHTML = "";
 
   const groups = {
@@ -198,7 +203,7 @@ function createStreamItem(stream, type, meta) {
   const displayName =
     stream.displayName ||
     stream.pageTitle ||
-    prettifyFilename(stream.filename) ||
+    stream.filename ||
     "Untitled";
   titleEl.textContent = displayName;
   titleEl.title = stream.url;
@@ -231,9 +236,10 @@ function createStreamItem(stream, type, meta) {
 
   // Download button - works for ALL types now
   if (type === "video" || type === "audio") {
-    actions.appendChild(
-      createButton("Download", "btn-download", () => downloadDirect(stream))
+    const dlBtn = createButton("Download", "btn-download", () =>
+      downloadDirect(stream, dlBtn)
     );
+    actions.appendChild(dlBtn);
   } else if (type === "hls") {
     actions.appendChild(
       createButton("Download", "btn-download", () =>
@@ -335,9 +341,22 @@ function createProgressBar(downloadId) {
 
 // --- Download handlers ---
 
-function downloadDirect(stream) {
+function downloadDirect(stream, btn) {
   const name = stream.displayName || stream.filename;
   const filename = name !== "unknown" ? name : undefined;
+
+  // Visual feedback on button
+  if (btn) {
+    btn.textContent = "Started";
+    btn.disabled = true;
+    btn.classList.add("btn-started");
+    setTimeout(() => {
+      btn.textContent = "Download";
+      btn.disabled = false;
+      btn.classList.remove("btn-started");
+    }, 2000);
+  }
+
   chrome.runtime.sendMessage({
     action: "download",
     url: stream.url,
@@ -445,22 +464,6 @@ function downloadDASH(stream, itemEl) {
   );
 }
 
-// --- Pretty filename ---
-
-function prettifyFilename(filename) {
-  if (!filename || filename === "unknown") return null;
-  let pretty = filename.replace(/[a-f0-9]{32,}/gi, "");
-  pretty = pretty.replace(
-    /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi,
-    ""
-  );
-  pretty = pretty
-    .replace(/^[-_.\s]+|[-_.\s]+$/g, "")
-    .replace(/[-_]{2,}/g, " ");
-  if (!pretty || pretty.length < 3) return null;
-  return pretty;
-}
-
 function extractDomain(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -511,13 +514,13 @@ function copyToClipboard(text) {
 // --- Copy All ---
 
 copyAllBtn.addEventListener("click", () => {
-  const urls = Object.values(currentStreams)
-    .filter((s) => s.type !== "segment")
-    .map((s) => s.url)
-    .join("\n");
+  const streams = Object.values(currentStreams).filter(
+    (s) => s.type !== "segment"
+  );
+  const urls = streams.map((s) => s.url).join("\n");
   if (urls) {
     copyToClipboard(urls);
-    showToast("URLs copied!");
+    showToast(`${streams.length} URL${streams.length !== 1 ? "s" : ""} copied!`);
   }
 });
 
@@ -557,6 +560,7 @@ function showToast(message) {
 function showEmpty() {
   emptyState.hidden = false;
   copyAllBtn.style.display = "none";
+  streamCountEl.hidden = true;
   streamsContainer.innerHTML = "";
 }
 

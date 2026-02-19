@@ -4,27 +4,41 @@
 (function () {
   "use strict";
 
+  const log = (...args) => console.debug("[VidSniff:content]", ...args);
+
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
+
+  // --- Timing constants ---
+  const URL_POLL_INTERVAL_MS = 800;    // How often to check for SPA URL changes
+  const SCAN_DEBOUNCE_MS = 500;        // Debounce for MutationObserver scans
+  const SCAN_DELAYS_MS = [1000, 3000, 8000, 15000]; // Progressive scan delays for lazy content
+
+  // Blocked domain suffixes — kept in sync with background.js
+  const BLOCKED_SUFFIXES = [
+    ".stripe.com", ".stripe.network",
+    ".paypal.com",
+    ".googlesyndication.com", ".doubleclick.net",
+    ".google-analytics.com", ".googletagmanager.com",
+    ".facebook.net",
+    ".sentry.io",
+    ".hotjar.com",
+    ".intercom.io", ".crisp.chat", ".tawk.to",
+    ".newrelic.com", ".nr-data.net",
+    ".segment.io", ".segment.com",
+    ".mixpanel.com", ".amplitude.com",
+    ".heapanalytics.com", ".fullstory.com",
+    ".mouseflow.com", ".clarity.ms",
+    ".adroll.com", ".adsrvr.org",
+  ];
 
   function isBlockedUrl(url) {
     try {
       const hostname = new URL(url).hostname.toLowerCase();
-      // Block stripe and other non-video domains
-      if (
-        hostname.endsWith(".stripe.com") || hostname === "stripe.com" ||
-        hostname.endsWith(".stripe.network") || hostname === "stripe.network" ||
-        hostname.endsWith(".paypal.com") ||
-        hostname.endsWith(".doubleclick.net") ||
-        hostname.endsWith(".googlesyndication.com") ||
-        hostname.endsWith(".google-analytics.com") ||
-        hostname.endsWith(".sentry.io") ||
-        hostname.endsWith(".hotjar.com") ||
-        hostname.endsWith(".intercom.io") ||
-        hostname.endsWith(".nr-data.net") ||
-        hostname.endsWith(".newrelic.com")
-      ) {
-        return true;
+      for (const suffix of BLOCKED_SUFFIXES) {
+        if (hostname.endsWith(suffix) || hostname === suffix.substring(1)) {
+          return true;
+        }
       }
       return false;
     } catch {
@@ -46,13 +60,13 @@
       reportedUrls = new Set();
       pageMetadata = null;
       // Give the new page content time to load
-      setTimeout(scanMediaElements, 1000);
-      setTimeout(scanMediaElements, 3000);
+      setTimeout(scanMediaElements, SCAN_DELAYS_MS[0]);
+      setTimeout(scanMediaElements, SCAN_DELAYS_MS[1]);
     }
   }
 
   // Poll for URL changes (catches pushState, replaceState, and hash changes)
-  setInterval(checkUrlChange, 800);
+  setInterval(checkUrlChange, URL_POLL_INTERVAL_MS);
   window.addEventListener("popstate", checkUrlChange);
 
   // --- Extract page metadata for meaningful names ---
@@ -146,6 +160,7 @@
     if (!STREAM_PATTERN.test(url)) return;
 
     reportedUrls.add(url);
+    log("detected:", source, url);
 
     const meta = getPageMetadata();
 
@@ -259,7 +274,7 @@
   let scanTimeout = null;
   function debouncedScan() {
     if (scanTimeout) clearTimeout(scanTimeout);
-    scanTimeout = setTimeout(scanMediaElements, 500);
+    scanTimeout = setTimeout(scanMediaElements, SCAN_DEBOUNCE_MS);
   }
 
   const observer = new MutationObserver((mutations) => {
@@ -390,7 +405,7 @@
   }
 
   // Re-scan periodically for lazy-loaded content
-  setTimeout(scanMediaElements, 3000);
-  setTimeout(scanMediaElements, 8000);
-  setTimeout(scanMediaElements, 15000);
+  for (const delay of SCAN_DELAYS_MS) {
+    setTimeout(scanMediaElements, delay);
+  }
 })();

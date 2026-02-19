@@ -6,6 +6,8 @@
 (function () {
   "use strict";
 
+  const log = (...args) => console.debug("[VidSniff:inject]", ...args);
+
   // Only match actual video/audio/stream file extensions
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
@@ -17,18 +19,31 @@
   // Video extensions we look for in response bodies
   const VIDEO_EXT_LIST = ["m3u8", "mpd", "mp4", "webm", "mkv", "mov", "flv"];
 
+  // Blocked domain suffixes — kept in sync with background.js
+  const BLOCKED_SUFFIXES = [
+    ".stripe.com", ".stripe.network",
+    ".paypal.com",
+    ".googlesyndication.com", ".doubleclick.net",
+    ".google-analytics.com", ".googletagmanager.com",
+    ".facebook.net",
+    ".sentry.io",
+    ".hotjar.com",
+    ".intercom.io", ".crisp.chat", ".tawk.to",
+    ".newrelic.com", ".nr-data.net",
+    ".segment.io", ".segment.com",
+    ".mixpanel.com", ".amplitude.com",
+    ".heapanalytics.com", ".fullstory.com",
+    ".mouseflow.com", ".clarity.ms",
+    ".adroll.com", ".adsrvr.org",
+  ];
+
   function isBlocked(hostname) {
-    return (
-      hostname.endsWith(".stripe.com") || hostname === "stripe.com" ||
-      hostname.endsWith(".stripe.network") || hostname === "stripe.network" ||
-      hostname.endsWith(".paypal.com") ||
-      hostname.endsWith(".doubleclick.net") ||
-      hostname.endsWith(".googlesyndication.com") ||
-      hostname.endsWith(".google-analytics.com") ||
-      hostname.endsWith(".sentry.io") ||
-      hostname.endsWith(".nr-data.net") ||
-      hostname.endsWith(".newrelic.com")
-    );
+    for (const suffix of BLOCKED_SUFFIXES) {
+      if (hostname.endsWith(suffix) || hostname === suffix.substring(1)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Track which URLs we already reported to avoid duplicates
@@ -46,6 +61,7 @@
       // AND does NOT match non-video pattern
       if (STREAM_PATTERN.test(absolute) && !NON_VIDEO_PATTERN.test(absolute)) {
         reportedUrls.add(absolute);
+        log("detected:", source, absolute);
         window.postMessage(
           {
             type: "VIDSNIFF_DETECTED",

@@ -1,6 +1,12 @@
 // VidSniff - HLS & DASH Downloaders (hls-downloader.js)
 // Downloads HLS/DASH streams by fetching manifests, parsing segments, downloading & merging
 
+const CONCURRENT_SEGMENTS = 6;       // Max parallel segment downloads
+const MAX_BATCH_RETRIES = 3;         // Max retries per batch of segments
+const MAX_SEGMENT_RETRIES = 2;       // Max retries per individual segment
+const DOWNLOAD_CLEANUP_MS = 60000;   // How long to keep completed download state
+const PROGRESS_SCALE = 95;           // Progress bar reserved for download (5% for merge)
+
 class HLSDownloader {
   constructor() {
     this.downloads = new Map();
@@ -187,21 +193,19 @@ class HLSDownloader {
     dl.progress = 100;
     this._notifyProgress(dl);
 
-    setTimeout(() => this.downloads.delete(dl.id), 60000);
+    setTimeout(() => this.downloads.delete(dl.id), DOWNLOAD_CLEANUP_MS);
   }
 
   async _downloadSegments(dl, segments) {
     const chunks = [];
-    const CONCURRENT = 6;
     let retries = 0;
-    const MAX_RETRIES = 3;
 
-    for (let i = 0; i < segments.length; i += CONCURRENT) {
+    for (let i = 0; i < segments.length; i += CONCURRENT_SEGMENTS) {
       if (dl.abortController.signal.aborted) {
         throw new Error("Download cancelled");
       }
 
-      const batch = segments.slice(i, i + CONCURRENT);
+      const batch = segments.slice(i, i + CONCURRENT_SEGMENTS);
       try {
         const results = await Promise.all(
           batch.map((seg) => this._fetchBinaryWithRetry(dl, seg.url))
@@ -212,15 +216,15 @@ class HLSDownloader {
           dl.downloadedSegments++;
           dl.totalBytes += chunk.byteLength;
           dl.progress = Math.round(
-            (dl.downloadedSegments / dl.totalSegments) * 95
+            (dl.downloadedSegments / dl.totalSegments) * PROGRESS_SCALE
           );
           this._notifyProgress(dl);
         }
         retries = 0; // Reset on success
       } catch (err) {
-        if (retries < MAX_RETRIES) {
+        if (retries < MAX_BATCH_RETRIES) {
           retries++;
-          i -= CONCURRENT; // Retry this batch
+          i -= CONCURRENT_SEGMENTS; // Retry this batch
           await new Promise((r) => setTimeout(r, 1000 * retries));
           continue;
         }
@@ -235,7 +239,7 @@ class HLSDownloader {
     try {
       return await this._fetchBinary(dl, url);
     } catch (err) {
-      if (attempt < 2 && !dl.abortController.signal.aborted) {
+      if (attempt < MAX_SEGMENT_RETRIES && !dl.abortController.signal.aborted) {
         await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
         return this._fetchBinaryWithRetry(dl, url, attempt + 1);
       }
@@ -546,7 +550,7 @@ class DASHDownloader {
     dl.progress = 100;
     this._notifyProgress(dl);
 
-    setTimeout(() => this.downloads.delete(dl.id), 60000);
+    setTimeout(() => this.downloads.delete(dl.id), DOWNLOAD_CLEANUP_MS);
   }
 
   _parseMPD(mpdText, baseUrl) {
@@ -775,24 +779,35 @@ class DASHDownloader {
 
   async _downloadSegments(dl, segments) {
     const chunks = [];
-    const CONCURRENT = 6;
+    let retries = 0;
 
-    for (let i = 0; i < segments.length; i += CONCURRENT) {
+    for (let i = 0; i < segments.length; i += CONCURRENT_SEGMENTS) {
       if (dl.abortController.signal.aborted) throw new Error("Cancelled");
 
-      const batch = segments.slice(i, i + CONCURRENT);
-      const results = await Promise.all(
-        batch.map((seg) => this._fetchBinaryWithRetry(dl, seg.url))
-      );
-
-      for (const chunk of results) {
-        chunks.push(chunk);
-        dl.downloadedSegments++;
-        dl.totalBytes += chunk.byteLength;
-        dl.progress = Math.round(
-          (dl.downloadedSegments / dl.totalSegments) * 95
+      const batch = segments.slice(i, i + CONCURRENT_SEGMENTS);
+      try {
+        const results = await Promise.all(
+          batch.map((seg) => this._fetchBinaryWithRetry(dl, seg.url))
         );
-        this._notifyProgress(dl);
+
+        for (const chunk of results) {
+          chunks.push(chunk);
+          dl.downloadedSegments++;
+          dl.totalBytes += chunk.byteLength;
+          dl.progress = Math.round(
+            (dl.downloadedSegments / dl.totalSegments) * PROGRESS_SCALE
+          );
+          this._notifyProgress(dl);
+        }
+        retries = 0;
+      } catch (err) {
+        if (retries < MAX_BATCH_RETRIES) {
+          retries++;
+          i -= CONCURRENT_SEGMENTS; // Retry this batch
+          await new Promise((r) => setTimeout(r, 1000 * retries));
+          continue;
+        }
+        throw err;
       }
     }
 
@@ -803,7 +818,7 @@ class DASHDownloader {
     try {
       return await this._fetchBinary(dl, url);
     } catch (err) {
-      if (attempt < 2 && !dl.abortController.signal.aborted) {
+      if (attempt < MAX_SEGMENT_RETRIES && !dl.abortController.signal.aborted) {
         await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
         return this._fetchBinaryWithRetry(dl, url, attempt + 1);
       }

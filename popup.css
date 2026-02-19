@@ -54,6 +54,21 @@ header {
   color: #a29bfe;
 }
 
+.stream-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #6c5ce7;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -271,6 +286,14 @@ header {
 .btn-download {
   background: #6c5ce7;
   color: #fff;
+}
+.btn-download.btn-started {
+  background: #00b894;
+  pointer-events: none;
+}
+.btn-download:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 .btn-copy {
   background: #2d2d3a;
