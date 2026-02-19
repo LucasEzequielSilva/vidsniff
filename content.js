@@ -161,6 +161,34 @@
     });
   }
 
+  // --- Check if a video element is likely a thumbnail/preview ---
+
+  function isPreviewVideo(videoEl) {
+    if (!videoEl || videoEl.tagName !== "VIDEO") return false;
+
+    // Muted + looping = almost certainly an auto-playing preview/thumbnail
+    if (videoEl.muted && videoEl.loop) return true;
+
+    // Very small visible dimensions = thumbnail preview
+    const rect = videoEl.getBoundingClientRect();
+    if (rect.width > 0 && rect.width < 150) return true;
+    if (rect.height > 0 && rect.height < 100) return true;
+
+    // Check if the video element is inside a thumbnail-like container
+    const thumbContainer = videoEl.closest(
+      '[class*="thumb"], [class*="preview"], [class*="poster"], ' +
+      '[class*="Thumb"], [class*="Preview"], [class*="Poster"], ' +
+      '[role="img"], [class*="card-img"], [class*="teaser"]'
+    );
+    if (thumbContainer) return true;
+
+    // Very short + muted = likely a hover preview (e.g. YouTube, Netflix)
+    const dur = videoEl.duration;
+    if (dur && isFinite(dur) && dur < 10 && videoEl.muted) return true;
+
+    return false;
+  }
+
   // --- DOM Scanning ---
 
   function scanMediaElements() {
@@ -185,6 +213,9 @@
                 ? el.closest("video")
                 : null;
 
+          // Skip thumbnail/preview video elements
+          if (videoEl && isPreviewVideo(videoEl)) continue;
+
           const extraMeta = {};
           if (videoEl) {
             const thumb = getVideoThumbnail(videoEl);
@@ -204,6 +235,9 @@
         try {
           const absolute = new URL(video.currentSrc, document.baseURI).href;
           if (isBlockedUrl(absolute)) continue;
+
+          // Skip thumbnail/preview video elements
+          if (video.tagName === "VIDEO" && isPreviewVideo(video)) continue;
 
           const extraMeta = {};
           if (video.tagName === "VIDEO") {
@@ -225,11 +259,24 @@
 
   function sendThumbnailUpdate() {
     const meta = getPageMetadata();
-    const videos = document.querySelectorAll("video");
+    const videos = [...document.querySelectorAll("video")];
     let bestThumb = meta.thumbnail;
     let bestDuration = null;
 
-    for (const v of videos) {
+    // Sort videos by visible area (largest first) — the biggest video
+    // on the page is almost certainly the main content, not a preview
+    const sorted = videos
+      .filter((v) => !isPreviewVideo(v))
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+      });
+
+    // Fall back to all videos if filtering removed everything
+    const candidates = sorted.length > 0 ? sorted : videos;
+
+    for (const v of candidates) {
       const t = getVideoThumbnail(v);
       if (t) {
         bestThumb = t;
@@ -237,7 +284,7 @@
       }
     }
 
-    for (const v of videos) {
+    for (const v of candidates) {
       const d = getVideoDuration(v);
       if (d) {
         bestDuration = d;

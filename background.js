@@ -16,6 +16,10 @@ const DASH_MIMES = /^application\/dash\+xml/i;
 
 // Minimum size to filter out tracking pixels and tiny files (10KB)
 const MIN_SIZE_BYTES = 10240;
+// Higher threshold for actual video files to skip thumbnail/preview videos (500KB)
+const MIN_VIDEO_SIZE_BYTES = 524288;
+// Image MIME pattern — these are NEVER videos, even if the URL matched
+const IMAGE_MIMES = /^image\//i;
 
 // --- Domain blocklist ---
 // These domains serve non-video content that happens to match video patterns
@@ -433,11 +437,37 @@ chrome.webRequest.onHeadersReceived.addListener(
       ? parseInt(contentLengthHeader.value, 10)
       : null;
 
-    if (contentLength !== null && contentLength < MIN_SIZE_BYTES) return;
+    // If the response is actually an image, remove any stream that was
+    // optimistically added by onBeforeRequest and bail out
+    if (contentType && IMAGE_MIMES.test(contentType)) {
+      const streams = tabStreams.get(details.tabId);
+      if (streams && streams.has(details.url)) {
+        streams.delete(details.url);
+        updateBadge(details.tabId);
+        persistTabData(details.tabId);
+      }
+      return;
+    }
 
     const mimeType = classifyByMime(contentType);
     const urlType = classifyByUrl(details.url);
     const type = mimeType || urlType;
+
+    // Apply size filtering — use a higher threshold for actual video files
+    // (thumbnail/preview videos are often small mp4s under 500KB)
+    if (contentLength !== null) {
+      const minSize = (type === "video") ? MIN_VIDEO_SIZE_BYTES : MIN_SIZE_BYTES;
+      if (contentLength < minSize) {
+        // Remove if it was already added by onBeforeRequest
+        const streams = tabStreams.get(details.tabId);
+        if (streams && streams.has(details.url)) {
+          streams.delete(details.url);
+          updateBadge(details.tabId);
+          persistTabData(details.tabId);
+        }
+        return;
+      }
+    }
 
     if (!type) return;
 
