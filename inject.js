@@ -14,10 +14,8 @@
   const NON_VIDEO_PATTERN =
     /\.(json|js|css|html|htm|xml|txt|svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|eot|vtt|srt|map)(\?|#|$)/i;
 
-  // Pattern to find video URLs inside JSON/text response bodies
-  // ONLY match actual video/stream extensions, NOT json/jpg/vtt/etc
-  const URL_IN_BODY_PATTERN =
-    /https?:\/\/[^\s"'\\<>]+?\.(m3u8|mpd|mp4|webm|mkv|mov|flv)(?:[?#][^\s"'\\<>]*)?/gi;
+  // Video extensions we look for in response bodies
+  const VIDEO_EXT_LIST = ["m3u8", "mpd", "mp4", "webm", "mkv", "mov", "flv"];
 
   function isBlocked(hostname) {
     return (
@@ -67,18 +65,28 @@
       // Don't scan huge responses (>2MB)
       if (text.length > 2 * 1024 * 1024) return;
 
-      // Find all URLs that look like video streams
-      const matches = text.match(URL_IN_BODY_PATTERN);
-      if (!matches) return;
+      // First, unescape the text so we can find URLs properly
+      // JSON escapes: \/ -> /, \\u002F -> /, \" -> "
+      let cleaned = text;
+      cleaned = cleaned.replace(/\\u002[Ff]/g, "/");
+      cleaned = cleaned.replace(/\\\//g, "/");
+
+      // Now find all http(s) URLs in the cleaned text
+      const urlPattern = /https?:\/\/[^\s"'<>\]},]+/gi;
+      const allUrls = cleaned.match(urlPattern);
+      if (!allUrls) return;
 
       const seen = new Set();
-      for (let rawUrl of matches) {
-        // Clean up escaped URLs from JSON
-        rawUrl = rawUrl.replace(/\\u002F/g, "/");
-        rawUrl = rawUrl.replace(/\\\//g, "/");
-        rawUrl = rawUrl.replace(/\\"/g, "");
-        // Remove trailing punctuation that might have been captured
-        rawUrl = rawUrl.replace(/[,;)\]}>]+$/, "");
+      for (let rawUrl of allUrls) {
+        // Remove trailing quotes or punctuation
+        rawUrl = rawUrl.replace(/[\\",;)\]}>]+$/, "");
+
+        // Check if URL has a video extension
+        const hasVideoExt = VIDEO_EXT_LIST.some((ext) => {
+          const re = new RegExp("\\." + ext + "([?#]|$)", "i");
+          return re.test(rawUrl);
+        });
+        if (!hasVideoExt) continue;
 
         if (seen.has(rawUrl)) continue;
         seen.add(rawUrl);
@@ -93,17 +101,27 @@
     } catch {}
   }
 
-  // Check if a request URL is a GraphQL or known video API endpoint
+  // Check if a request URL is a known video API endpoint worth scanning
   function isVideoApiEndpoint(url) {
     try {
       const urlObj = new URL(url);
+      const host = urlObj.hostname.toLowerCase();
       const path = urlObj.pathname.toLowerCase();
-      // Only scan very specific endpoints that are known to return video URLs
-      return (
-        path.includes("/graphql") ||
-        path.includes("/oembed") ||
-        path.includes("/player/config")
-      );
+
+      // GraphQL endpoints (Loom, etc.)
+      if (path.includes("/graphql")) return true;
+      // oEmbed endpoints
+      if (path.includes("/oembed")) return true;
+      // Player config endpoints
+      if (path.includes("/player/config")) return true;
+      // Loom-specific API endpoints
+      if (host.includes("loom.com") && path.includes("/v1/")) return true;
+      // Vimeo config
+      if (host.includes("vimeo.com") && path.includes("/video/")) return true;
+      // Wistia
+      if (host.includes("wistia.com") && path.includes("/embed/")) return true;
+
+      return false;
     } catch {
       return false;
     }

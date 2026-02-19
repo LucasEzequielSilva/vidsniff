@@ -540,9 +540,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "addStream") {
     const tabId = sender.tab?.id || message.tabId;
+    const frameId = sender.frameId;
     if (tabId && tabId >= 0) {
-      // Update page metadata
-      if (message.pageTitle || message.pageThumbnail) {
+      // Only update page metadata from the TOP FRAME (frameId=0)
+      // Iframes (Loom embeds, etc.) have their own titles that are useless
+      if (frameId === 0 && (message.pageTitle || message.pageThumbnail)) {
         if (!tabMeta.has(tabId)) tabMeta.set(tabId, {});
         const meta = tabMeta.get(tabId);
         if (message.pageTitle) meta.pageTitle = message.pageTitle;
@@ -569,13 +571,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "updateTabMetadata") {
     const tabId = sender.tab?.id;
+    const frameId = sender.frameId;
     if (tabId && tabId >= 0) {
       if (!tabMeta.has(tabId)) tabMeta.set(tabId, {});
       const meta = tabMeta.get(tabId);
+      // Only accept thumbnail and duration from any frame
       if (message.thumbnail) meta.thumbnail = message.thumbnail;
       if (message.duration) meta.duration = message.duration;
-      if (message.pageTitle) meta.pageTitle = message.pageTitle;
-      if (message.siteName) meta.siteName = message.siteName;
+      // Only accept page title and site name from the TOP FRAME
+      if (frameId === 0) {
+        if (message.pageTitle) meta.pageTitle = message.pageTitle;
+        if (message.siteName) meta.siteName = message.siteName;
+      }
 
       // Re-derive names for existing streams with fresh metadata
       const streams = tabStreams.get(tabId);
