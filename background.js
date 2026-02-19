@@ -64,6 +64,7 @@ const BLOCKED_DOMAIN_SUFFIXES = [
 const VIDEO_DOMAIN_WHITELIST = [
   "loom.com",
   "cdn.loom.com",
+  "luna.loom.com",
   "loomcdn.com",
   "vimeo.com",
   "player.vimeo.com",
@@ -71,6 +72,7 @@ const VIDEO_DOMAIN_WHITELIST = [
   "youtube.com",
   "googlevideo.com",
   "cloudfront.net",
+  "d2eebagvwr542c.cloudfront.net",
   "akamaized.net",
   "fastly.net",
   "cdn.jwplayer.com",
@@ -80,9 +82,14 @@ const VIDEO_DOMAIN_WHITELIST = [
   "cloudflarestream.com",
   "vidyard.com",
   "wistia.com",
+  "fast.wistia.com",
   "brightcove.com",
+  "brightcovecdn.com",
   "jwpcdn.com",
+  "jwplatform.com",
   "flowplayer.com",
+  "s3.amazonaws.com",
+  "s3-accelerate.amazonaws.com",
 ];
 
 function isBlockedDomain(url) {
@@ -126,6 +133,17 @@ const hlsDownloader = new HLSDownloader();
 const dashDownloader = new DASHDownloader();
 
 // --- Classification ---
+
+function isVideoCdnDomain(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return VIDEO_DOMAIN_WHITELIST.some(
+      (d) => hostname === d || hostname.endsWith("." + d)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function classifyByUrl(url) {
   try {
@@ -370,7 +388,26 @@ chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
     if (isBlockedDomain(details.url)) return;
-    const type = classifyByUrl(details.url);
+
+    let type = classifyByUrl(details.url);
+
+    // Also check if this is a request to a known video CDN with video-like path
+    if (!type && isVideoCdnDomain(details.url)) {
+      const urlLower = details.url.toLowerCase();
+      if (urlLower.includes("/hls/") || urlLower.includes("m3u8")) {
+        type = "hls";
+      } else if (urlLower.includes("/dash/") || urlLower.includes(".mpd")) {
+        type = "mpd";
+      } else if (
+        urlLower.includes("/transcoded/") ||
+        urlLower.includes("/sessions/") ||
+        urlLower.includes("/video") ||
+        urlLower.includes("/media")
+      ) {
+        type = "video";
+      }
+    }
+
     if (!type) return;
 
     addStream(details.tabId, {
@@ -523,17 +560,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.siteName) meta.siteName = message.siteName;
       }
 
-      addStream(tabId, {
-        url: message.url,
-        type: message.type || classifyByUrl(message.url) || "video",
-        ext: getExtension(message.url),
-        filename: getFilename(message.url),
-        source: message.source || "content",
-        timestamp: Date.now(),
-        tabId,
-        videoThumbnail: message.videoThumbnail || null,
-        duration: message.duration || null,
-      });
+      // Classify URL — if no type detected by extension, check if it's from a video CDN
+      let streamType = message.type || classifyByUrl(message.url);
+      if (!streamType && isVideoCdnDomain(message.url)) {
+        // Try to infer type from URL patterns
+        const urlLower = message.url.toLowerCase();
+        if (urlLower.includes("/hls/") || urlLower.includes("m3u8")) {
+          streamType = "hls";
+        } else if (urlLower.includes("/dash/") || urlLower.includes(".mpd")) {
+          streamType = "mpd";
+        } else {
+          streamType = "video";
+        }
+      }
+
+      if (streamType) {
+        addStream(tabId, {
+          url: message.url,
+          type: streamType,
+          ext: getExtension(message.url) || typeToExt(streamType),
+          filename: getFilename(message.url),
+          source: message.source || "content",
+          timestamp: Date.now(),
+          tabId,
+          videoThumbnail: message.videoThumbnail || null,
+          duration: message.duration || null,
+        });
+      }
     }
     sendResponse({ ok: true });
   }
