@@ -6,42 +6,18 @@
 (function () {
   "use strict";
 
+  // Only match actual video/audio/stream file extensions
   const STREAM_PATTERN =
-    /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a|ts)(\?|#|$)/i;
+    /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
+
+  // NON-video extensions to explicitly reject
+  const NON_VIDEO_PATTERN =
+    /\.(json|js|css|html|htm|xml|txt|svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|eot|vtt|srt|map)(\?|#|$)/i;
 
   // Pattern to find video URLs inside JSON/text response bodies
+  // ONLY match actual video/stream extensions, NOT json/jpg/vtt/etc
   const URL_IN_BODY_PATTERN =
-    /https?:\/\/[^\s"'\\<>]+?\.(m3u8|mpd|mp4|webm|mkv|mov|flv|mp3|aac|ogg|flac|m4a)(?:[?#][^\s"'\\<>]*)?/gi;
-
-  // Known API endpoints that return video URLs in their response body
-  const API_ENDPOINTS = [
-    "/graphql",       // Loom, many modern sites
-    "/api/",          // Generic REST APIs
-    "/v1/",           // Versioned APIs
-    "/v2/",
-    "/v3/",
-    "/oembed",        // oEmbed endpoints
-    "/embed/",        // Embed endpoints
-    "/player/",       // Player config endpoints
-  ];
-
-  // Known video CDN domains — URLs from these are always worth reporting
-  const VIDEO_CDN_DOMAINS = [
-    "loom.com", "cdn.loom.com", "luna.loom.com", "loomcdn.com",
-    "vimeo.com", "vimeocdn.com", "player.vimeo.com",
-    "googlevideo.com",
-    "cloudfront.net", "d2eebagvwr542c.cloudfront.net",
-    "akamaized.net", "fastly.net",
-    "mux.com", "stream.mux.com",
-    "cloudflarestream.com",
-    "wistia.com", "fast.wistia.com",
-    "brightcove.com", "brightcovecdn.com",
-    "jwplayer.com", "jwpcdn.com", "jwplatform.com",
-    "vidyard.com",
-    "flowplayer.com",
-    "bitmovin.com",
-    "s3.amazonaws.com", "s3-accelerate.amazonaws.com",
-  ];
+    /https?:\/\/[^\s"'\\<>]+?\.(m3u8|mpd|mp4|webm|mkv|mov|flv)(?:[?#][^\s"'\\<>]*)?/gi;
 
   function isBlocked(hostname) {
     return (
@@ -57,17 +33,6 @@
     );
   }
 
-  function isVideoCdnUrl(url) {
-    try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return VIDEO_CDN_DOMAINS.some(
-        (d) => hostname === d || hostname.endsWith("." + d)
-      );
-    } catch {
-      return false;
-    }
-  }
-
   // Track which URLs we already reported to avoid duplicates
   const reportedUrls = new Set();
 
@@ -79,8 +44,9 @@
       const hostname = new URL(absolute).hostname.toLowerCase();
       if (isBlocked(hostname)) return;
 
-      // Report if it matches stream pattern OR is from a known video CDN
-      if (STREAM_PATTERN.test(absolute) || isVideoCdnUrl(absolute)) {
+      // ONLY report if it matches stream/video pattern
+      // AND does NOT match non-video pattern
+      if (STREAM_PATTERN.test(absolute) && !NON_VIDEO_PATTERN.test(absolute)) {
         reportedUrls.add(absolute);
         window.postMessage(
           {
@@ -98,7 +64,7 @@
   function scanResponseBody(text, requestUrl, source) {
     try {
       if (!text || text.length < 20) return;
-      // Don't scan huge responses (>2MB) — likely not API responses
+      // Don't scan huge responses (>2MB)
       if (text.length > 2 * 1024 * 1024) return;
 
       // Find all URLs that look like video streams
@@ -119,7 +85,7 @@
 
         try {
           const absolute = new URL(rawUrl, document.baseURI).href;
-          // Skip .ts segments to avoid noise — we want manifests and full files
+          // Skip .ts segments to avoid noise
           if (/\.ts(\?|#|$)/i.test(absolute)) continue;
           reportUrl(absolute, source);
         } catch {}
@@ -127,25 +93,20 @@
     } catch {}
   }
 
-  // Check if a request URL looks like an API endpoint worth scanning
-  function isApiEndpoint(url) {
+  // Check if a request URL is a GraphQL or known video API endpoint
+  function isVideoApiEndpoint(url) {
     try {
       const urlObj = new URL(url);
       const path = urlObj.pathname.toLowerCase();
-      return API_ENDPOINTS.some((ep) => path.includes(ep));
+      // Only scan very specific endpoints that are known to return video URLs
+      return (
+        path.includes("/graphql") ||
+        path.includes("/oembed") ||
+        path.includes("/player/config")
+      );
     } catch {
       return false;
     }
-  }
-
-  // Check if response content-type is JSON or text
-  function isJsonOrTextResponse(contentType) {
-    if (!contentType) return false;
-    return (
-      contentType.includes("application/json") ||
-      contentType.includes("text/") ||
-      contentType.includes("application/javascript")
-    );
   }
 
   // --- Intercept fetch ---
@@ -159,18 +120,12 @@
 
     const result = originalFetch.apply(this, arguments);
 
-    // Scan response body for video URLs
+    // Scan response body for video URLs — ONLY for specific API endpoints
     try {
-      if (reqUrl) {
+      if (reqUrl && isVideoApiEndpoint(reqUrl)) {
         result.then((response) => {
           try {
-            // Only scan API responses or same/video-CDN domain responses
-            const ct = response.headers?.get("content-type") || "";
-            const shouldScan =
-              isApiEndpoint(reqUrl) ||
-              isJsonOrTextResponse(ct);
-
-            if (shouldScan && response.ok) {
+            if (response.ok) {
               const clone = response.clone();
               clone.text().then((body) => {
                 scanResponseBody(body, reqUrl, "fetch-response");
@@ -202,17 +157,12 @@
     const xhr = this;
     const xhrUrl = xhr._vidsniffUrl;
 
-    // Add load listener to scan response body
+    // Scan response body ONLY for specific API endpoints
     try {
-      if (xhrUrl) {
+      if (xhrUrl && isVideoApiEndpoint(xhrUrl)) {
         xhr.addEventListener("load", function () {
           try {
-            const ct = xhr.getResponseHeader("content-type") || "";
-            const shouldScan =
-              isApiEndpoint(xhrUrl) ||
-              isJsonOrTextResponse(ct);
-
-            if (shouldScan && xhr.status >= 200 && xhr.status < 300) {
+            if (xhr.status >= 200 && xhr.status < 300) {
               const body = xhr.responseText;
               if (body) {
                 scanResponseBody(body, xhrUrl, "xhr-response");

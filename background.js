@@ -249,6 +249,9 @@ function getTabData(tabId) {
   return tabStreams.get(tabId);
 }
 
+// Non-video file extensions that should never be treated as streams
+const REJECT_EXTENSIONS = /\.(json|js|css|html|htm|xml|txt|svg|png|jpg|jpeg|gif|webp|ico|woff|woff2|ttf|eot|vtt|srt|map|php|asp|aspx)(\?|#|$)/i;
+
 function addStream(tabId, streamInfo) {
   const streams = getTabData(tabId);
   const url = streamInfo.url;
@@ -257,6 +260,12 @@ function addStream(tabId, streamInfo) {
   if (!url || url.startsWith("data:") || url.startsWith("blob:")) return;
   if (url.startsWith("chrome-extension://")) return;
   if (isBlockedDomain(url)) return;
+
+  // Reject non-video file types
+  try {
+    const path = new URL(url).pathname;
+    if (REJECT_EXTENSIONS.test(path)) return;
+  } catch {}
 
   // Deduplicate
   if (streams.has(url)) {
@@ -388,26 +397,7 @@ chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId < 0) return;
     if (isBlockedDomain(details.url)) return;
-
-    let type = classifyByUrl(details.url);
-
-    // Also check if this is a request to a known video CDN with video-like path
-    if (!type && isVideoCdnDomain(details.url)) {
-      const urlLower = details.url.toLowerCase();
-      if (urlLower.includes("/hls/") || urlLower.includes("m3u8")) {
-        type = "hls";
-      } else if (urlLower.includes("/dash/") || urlLower.includes(".mpd")) {
-        type = "mpd";
-      } else if (
-        urlLower.includes("/transcoded/") ||
-        urlLower.includes("/sessions/") ||
-        urlLower.includes("/video") ||
-        urlLower.includes("/media")
-      ) {
-        type = "video";
-      }
-    }
-
+    const type = classifyByUrl(details.url);
     if (!type) return;
 
     addStream(details.tabId, {
@@ -560,33 +550,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.siteName) meta.siteName = message.siteName;
       }
 
-      // Classify URL — if no type detected by extension, check if it's from a video CDN
-      let streamType = message.type || classifyByUrl(message.url);
-      if (!streamType && isVideoCdnDomain(message.url)) {
-        // Try to infer type from URL patterns
-        const urlLower = message.url.toLowerCase();
-        if (urlLower.includes("/hls/") || urlLower.includes("m3u8")) {
-          streamType = "hls";
-        } else if (urlLower.includes("/dash/") || urlLower.includes(".mpd")) {
-          streamType = "mpd";
-        } else {
-          streamType = "video";
-        }
-      }
+      const streamType = message.type || classifyByUrl(message.url) || "video";
 
-      if (streamType) {
-        addStream(tabId, {
-          url: message.url,
-          type: streamType,
-          ext: getExtension(message.url) || typeToExt(streamType),
-          filename: getFilename(message.url),
-          source: message.source || "content",
-          timestamp: Date.now(),
-          tabId,
-          videoThumbnail: message.videoThumbnail || null,
-          duration: message.duration || null,
-        });
-      }
+      addStream(tabId, {
+        url: message.url,
+        type: streamType,
+        ext: getExtension(message.url) || typeToExt(streamType),
+        filename: getFilename(message.url),
+        source: message.source || "content",
+        timestamp: Date.now(),
+        tabId,
+        videoThumbnail: message.videoThumbnail || null,
+        duration: message.duration || null,
+      });
     }
     sendResponse({ ok: true });
   }

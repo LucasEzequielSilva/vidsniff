@@ -7,32 +7,6 @@
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
 
-  // Known video CDN domains — always report URLs from these
-  const VIDEO_CDN_DOMAINS = [
-    "loom.com", "cdn.loom.com", "luna.loom.com", "loomcdn.com",
-    "vimeo.com", "vimeocdn.com", "player.vimeo.com",
-    "googlevideo.com",
-    "cloudfront.net",
-    "akamaized.net", "fastly.net",
-    "mux.com", "stream.mux.com",
-    "cloudflarestream.com",
-    "wistia.com", "fast.wistia.com",
-    "brightcove.com", "brightcovecdn.com",
-    "jwplayer.com", "jwpcdn.com",
-    "vidyard.com",
-  ];
-
-  function isVideoCdnUrl(url) {
-    try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return VIDEO_CDN_DOMAINS.some(
-        (d) => hostname === d || hostname.endsWith("." + d)
-      );
-    } catch {
-      return false;
-    }
-  }
-
   function isBlockedUrl(url) {
     try {
       const hostname = new URL(url).hostname.toLowerCase();
@@ -168,8 +142,8 @@
     if (url.startsWith("blob:") || url.startsWith("data:")) return;
     if (isBlockedUrl(url)) return;
 
-    // Only report if URL matches stream pattern OR is from a known video CDN
-    if (!STREAM_PATTERN.test(url) && !isVideoCdnUrl(url)) return;
+    // Only report if URL matches a video/audio/stream file extension
+    if (!STREAM_PATTERN.test(url)) return;
 
     reportedUrls.add(url);
 
@@ -328,39 +302,9 @@
     if (event.data?.type === "VIDSNIFF_DETECTED") {
       const url = event.data.url;
       const source = event.data.source || "inject";
-
-      // For URLs discovered in response bodies, we may need to classify them
-      // even if they don't match STREAM_PATTERN (e.g., CDN URLs without extension)
-      if (url && !reportedUrls.has(url)) {
-        if (url.startsWith("blob:") || url.startsWith("data:")) return;
-        if (isBlockedUrl(url)) return;
-
-        reportedUrls.add(url);
-
-        const meta = getPageMetadata();
-
-        // Get extra metadata from video elements if available
-        const videos = document.querySelectorAll("video");
-        const extraMeta = {};
-        for (const v of videos) {
-          const thumb = getVideoThumbnail(v);
-          if (thumb) { extraMeta.videoThumbnail = thumb; break; }
-        }
-        for (const v of videos) {
-          const dur = getVideoDuration(v);
-          if (dur) { extraMeta.duration = dur; break; }
-        }
-
-        chrome.runtime.sendMessage({
-          action: "addStream",
-          url,
-          source,
-          pageTitle: meta.title,
-          pageThumbnail: meta.thumbnail,
-          siteName: meta.siteName,
-          pageUrl: meta.pageUrl,
-          ...extraMeta,
-        });
+      // Use reportUrl which already filters by STREAM_PATTERN
+      if (url) {
+        reportUrl(url, source);
       }
     }
   });
