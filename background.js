@@ -3,6 +3,9 @@
 
 importScripts("hls-downloader.js");
 
+// Debug logging — visible in DevTools when "Verbose" log level is enabled
+const log = (...args) => console.debug("[VidSniff:bg]", ...args);
+
 const VIDEO_EXTENSIONS = /\.(mp4|webm|mkv|avi|mov|flv|wmv)(\?|#|$)/i;
 const HLS_EXTENSIONS = /\.(m3u8)(\?|#|$)/i;
 const DASH_EXTENSIONS = /\.(mpd)(\?|#|$)/i;
@@ -16,6 +19,9 @@ const DASH_MIMES = /^application\/dash\+xml/i;
 
 // Minimum size to filter out tracking pixels and tiny files (10KB)
 const MIN_SIZE_BYTES = 10240;
+
+// Max cached request headers per tab (oldest evicted first)
+const MAX_HEADERS_CACHE = 500;
 
 // --- Domain blocklist ---
 // These domains serve non-video content that happens to match video patterns
@@ -259,7 +265,10 @@ function addStream(tabId, streamInfo) {
   // Skip invalid URLs
   if (!url || url.startsWith("data:") || url.startsWith("blob:")) return;
   if (url.startsWith("chrome-extension://")) return;
-  if (isBlockedDomain(url)) return;
+  if (isBlockedDomain(url)) {
+    log("blocked domain:", url);
+    return;
+  }
 
   // Reject non-video file types
   try {
@@ -297,6 +306,7 @@ function addStream(tabId, streamInfo) {
     }
   }
 
+  log("new stream:", streamInfo.type, streamInfo.displayName, url);
   streams.set(url, streamInfo);
   updateBadge(tabId);
   persistTabData(tabId);
@@ -382,7 +392,7 @@ chrome.webRequest.onSendHeaders.addListener(
     tabHeaders.get(details.tabId).set(details.requestId, headers);
 
     const cache = tabHeaders.get(details.tabId);
-    if (cache.size > 500) {
+    if (cache.size > MAX_HEADERS_CACHE) {
       const first = cache.keys().next().value;
       cache.delete(first);
     }
