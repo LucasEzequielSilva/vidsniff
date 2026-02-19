@@ -65,13 +65,38 @@
       // Don't scan huge responses (>2MB)
       if (text.length > 2 * 1024 * 1024) return;
 
-      // First, unescape the text so we can find URLs properly
-      // JSON escapes: \/ -> /, \\u002F -> /, \" -> "
+      // --- LOOM GRAPHQL: Parse structured JSON for the MAIN video URL ---
+      // Loom's GetVideoSource returns the real video in data.getVideo.nullableRawCdnUrl.url
+      // We must use ONLY that field — blind URL scanning picks up intro/preview URLs too
+      if (requestUrl && requestUrl.includes("/graphql")) {
+        try {
+          const json = JSON.parse(text);
+          // GetVideoSource response
+          const rawCdnUrl = json?.data?.getVideo?.nullableRawCdnUrl?.url;
+          if (rawCdnUrl) {
+            reportUrl(rawCdnUrl, source + "-graphql");
+            return; // Don't scan generically — we got the authoritative URL
+          }
+          // Also check array responses (batched GraphQL)
+          if (Array.isArray(json)) {
+            for (const item of json) {
+              const url = item?.data?.getVideo?.nullableRawCdnUrl?.url;
+              if (url) {
+                reportUrl(url, source + "-graphql");
+                return;
+              }
+            }
+          }
+        } catch {} // Not valid JSON or different structure, fall through
+      }
+
+      // --- GENERIC: Scan for video URLs in response text ---
+      // Unescape JSON encoding first
       let cleaned = text;
       cleaned = cleaned.replace(/\\u002[Ff]/g, "/");
       cleaned = cleaned.replace(/\\\//g, "/");
 
-      // Now find all http(s) URLs in the cleaned text
+      // Find all http(s) URLs in the cleaned text
       const urlPattern = /https?:\/\/[^\s"'<>\]},]+/gi;
       const allUrls = cleaned.match(urlPattern);
       if (!allUrls) return;

@@ -591,9 +591,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!info.thumbnail && meta.thumbnail) {
             info.thumbnail = meta.thumbnail;
           }
-          if (!info.duration && meta.duration) {
-            info.duration = meta.duration;
-          }
+          // Do NOT propagate tab-level duration to individual streams
+          // Each stream should only show its own real duration
           info.displayName = deriveStreamName(url, tabId, info.type);
         }
         persistTabData(tabId);

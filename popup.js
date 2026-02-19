@@ -176,8 +176,9 @@ function createStreamItem(stream, type, meta) {
   typeOverlay.textContent = stream.ext?.toUpperCase() || type.toUpperCase();
   thumbEl.appendChild(typeOverlay);
 
-  // Duration badge
-  const duration = stream.duration || meta?.duration;
+  // Duration badge — only show if the stream has its OWN real duration
+  // Don't inherit from tab meta (causes intro to show main video's duration)
+  const duration = stream.duration;
   if (duration) {
     const durBadge = document.createElement("span");
     durBadge.className = "duration-badge";
