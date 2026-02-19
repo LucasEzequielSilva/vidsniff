@@ -17,56 +17,109 @@ const DASH_MIMES = /^application\/dash\+xml/i;
 // Minimum size to filter out tracking pixels and tiny files (10KB)
 const MIN_SIZE_BYTES = 10240;
 
-// Domains that are NOT video sources - payment processors, analytics, ads, etc.
-const BLOCKED_DOMAINS = [
-  "stripe.com",
+// --- Domain blocklist ---
+// These domains serve non-video content that happens to match video patterns
+// (Stripe uses .m3u8 internally for their fraud detection JS, etc.)
+const BLOCKED_DOMAINS = new Set([
   "js.stripe.com",
   "m.stripe.network",
-  "stripe.network",
-  "paypal.com",
-  "googlesyndication.com",
-  "doubleclick.net",
-  "google-analytics.com",
-  "googletagmanager.com",
-  "facebook.net",
-  "facebook.com",
-  "analytics.",
-  "sentry.io",
-  "hotjar.com",
-  "intercom.io",
-  "crisp.chat",
-  "tawk.to",
-  "newrelic.com",
-  "nr-data.net",
-  "segment.io",
-  "segment.com",
-  "mixpanel.com",
-  "amplitude.com",
-  "heapanalytics.com",
-  "fullstory.com",
-  "mouseflow.com",
-  "clarity.ms",
-  "adroll.com",
-  "adsrvr.org",
+  "r.stripe.com",
+  "q.stripe.com",
+  "api.stripe.com",
+  "checkout.stripe.com",
+  "hooks.stripe.com",
+  "errors.stripe.com",
+]);
+
+// Partial matches (any subdomain under these)
+const BLOCKED_DOMAIN_SUFFIXES = [
+  ".stripe.com",
+  ".stripe.network",
+  ".paypal.com",
+  ".googlesyndication.com",
+  ".doubleclick.net",
+  ".google-analytics.com",
+  ".googletagmanager.com",
+  ".facebook.net",
+  ".sentry.io",
+  ".hotjar.com",
+  ".intercom.io",
+  ".crisp.chat",
+  ".tawk.to",
+  ".newrelic.com",
+  ".nr-data.net",
+  ".segment.io",
+  ".segment.com",
+  ".mixpanel.com",
+  ".amplitude.com",
+  ".heapanalytics.com",
+  ".fullstory.com",
+  ".mouseflow.com",
+  ".clarity.ms",
+  ".adroll.com",
+  ".adsrvr.org",
+];
+
+// Whitelist: CDN domains that ARE legitimate video hosts
+const VIDEO_DOMAIN_WHITELIST = [
+  "loom.com",
+  "cdn.loom.com",
+  "loomcdn.com",
+  "vimeo.com",
+  "player.vimeo.com",
+  "vimeocdn.com",
+  "youtube.com",
+  "googlevideo.com",
+  "cloudfront.net",
+  "akamaized.net",
+  "fastly.net",
+  "cdn.jwplayer.com",
+  "bitmovin.com",
+  "mux.com",
+  "stream.mux.com",
+  "cloudflarestream.com",
+  "vidyard.com",
+  "wistia.com",
+  "brightcove.com",
+  "jwpcdn.com",
+  "flowplayer.com",
 ];
 
 function isBlockedDomain(url) {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
-    return BLOCKED_DOMAINS.some(
+
+    // Never block known video hosts
+    if (VIDEO_DOMAIN_WHITELIST.some(
       (d) => hostname === d || hostname.endsWith("." + d)
-    );
+    )) {
+      return false;
+    }
+
+    // Check exact matches
+    if (BLOCKED_DOMAINS.has(hostname)) return true;
+
+    // Check suffix matches
+    for (const suffix of BLOCKED_DOMAIN_SUFFIXES) {
+      if (hostname.endsWith(suffix) || hostname === suffix.substring(1)) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }
 }
 
-// Per-tab detected streams: { tabId: { url: streamInfo } }
+// Per-tab detected streams
 const tabStreams = new Map();
-// Per-tab request headers cache: { tabId: { requestId: headers } }
+// Per-tab request headers cache
 const tabHeaders = new Map();
 // Per-tab metadata (page title, thumbnail, etc.)
 const tabMeta = new Map();
+// Per-tab URL tracking (to detect SPA navigation)
+const tabUrls = new Map();
 
 // --- HLS & DASH Downloaders ---
 const hlsDownloader = new HLSDownloader();
@@ -109,8 +162,7 @@ function getFilename(url) {
   try {
     const path = new URL(url).pathname;
     const parts = path.split("/");
-    const last = parts[parts.length - 1];
-    return last || "unknown";
+    return parts[parts.length - 1] || "unknown";
   } catch {
     return "unknown";
   }
@@ -122,37 +174,52 @@ function deriveStreamName(url, tabId, type) {
   const meta = tabMeta.get(tabId);
   const pageTitle = meta?.pageTitle;
 
-  if (pageTitle) {
-    const ext = getExtension(url) || type;
+  if (pageTitle && pageTitle !== "Untitled") {
     const cleanTitle = pageTitle
       .replace(/[<>:"/\\|?*]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .substring(0, 80);
 
-    if (type === "hls") return `${cleanTitle}.m3u8`;
-    if (type === "mpd") return `${cleanTitle}.mpd`;
-    if (type === "audio") return `${cleanTitle}.${ext || "mp3"}`;
-    return `${cleanTitle}.${ext || "mp4"}`;
+    const ext = getExtension(url) || typeToExt(type);
+    return `${cleanTitle}.${ext}`;
   }
 
   return prettifyFilename(getFilename(url));
 }
 
+function typeToExt(type) {
+  const map = { video: "mp4", hls: "m3u8", mpd: "mpd", audio: "mp3", segment: "ts" };
+  return map[type] || "mp4";
+}
+
 function prettifyFilename(filename) {
   if (!filename || filename === "unknown") return "Untitled";
-
   let pretty = filename.replace(/[a-f0-9]{32,}/gi, "");
   pretty = pretty.replace(
     /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi,
     ""
   );
-  pretty = pretty
-    .replace(/^[-_.\s]+|[-_.\s]+$/g, "")
-    .replace(/[-_]{2,}/g, "-");
-
+  pretty = pretty.replace(/^[-_.\s]+|[-_.\s]+$/g, "").replace(/[-_]{2,}/g, "-");
   if (!pretty || pretty.length < 3) return filename;
   return pretty;
+}
+
+// --- Stream domain helpers ---
+
+function getStreamSiteName(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    // Map CDN hostnames to friendly names
+    if (hostname.includes("loom")) return "Loom";
+    if (hostname.includes("vimeo")) return "Vimeo";
+    if (hostname.includes("youtube") || hostname.includes("googlevideo")) return "YouTube";
+    if (hostname.includes("wistia")) return "Wistia";
+    if (hostname.includes("mux.com")) return "Mux";
+    return hostname.replace(/^(www|cdn|player)\./, "");
+  } catch {
+    return "";
+  }
 }
 
 // --- Stream Storage ---
@@ -168,40 +235,38 @@ function addStream(tabId, streamInfo) {
   const streams = getTabData(tabId);
   const url = streamInfo.url;
 
+  // Skip invalid URLs
+  if (!url || url.startsWith("data:") || url.startsWith("blob:")) return;
+  if (url.startsWith("chrome-extension://")) return;
+  if (isBlockedDomain(url)) return;
+
+  // Deduplicate
   if (streams.has(url)) {
     const existing = streams.get(url);
-    if (streamInfo.pageTitle && !existing.pageTitle) {
-      existing.pageTitle = streamInfo.pageTitle;
-      existing.displayName = deriveStreamName(url, tabId, existing.type);
-    }
     if (streamInfo.videoThumbnail && !existing.thumbnail) {
       existing.thumbnail = streamInfo.videoThumbnail;
     }
     if (streamInfo.duration && !existing.duration) {
       existing.duration = streamInfo.duration;
     }
+    // Always update displayName from latest metadata
+    const meta = tabMeta.get(tabId);
+    if (meta?.pageTitle && meta.pageTitle !== "Untitled") {
+      existing.displayName = deriveStreamName(url, tabId, existing.type);
+    }
     streams.set(url, existing);
-    persistTabData(tabId);
     return;
   }
 
-  if (url.startsWith("data:") || url.startsWith("blob:")) return;
-  if (url.startsWith("chrome-extension://")) return;
-  if (isBlockedDomain(url)) return;
-
+  // Set display name and site
   streamInfo.displayName = deriveStreamName(url, tabId, streamInfo.type);
+  streamInfo.streamSite = streamInfo.streamSite || getStreamSiteName(url);
 
+  // Attach tab metadata
   const meta = tabMeta.get(tabId);
   if (meta) {
     if (!streamInfo.thumbnail) {
-      streamInfo.thumbnail =
-        streamInfo.videoThumbnail || meta.thumbnail || null;
-    }
-    if (!streamInfo.pageTitle) {
-      streamInfo.pageTitle = meta.pageTitle;
-    }
-    if (!streamInfo.siteName) {
-      streamInfo.siteName = meta.siteName;
+      streamInfo.thumbnail = streamInfo.videoThumbnail || meta.thumbnail || null;
     }
   }
 
@@ -228,28 +293,38 @@ function removeSegments(tabId) {
 }
 
 async function persistTabData(tabId) {
-  const streams = getTabData(tabId);
-  const data = Object.fromEntries(streams);
-  const meta = tabMeta.get(tabId) || {};
-  await chrome.storage.session.set({
-    [`tab_${tabId}`]: data,
-    [`meta_${tabId}`]: meta,
-  });
+  try {
+    const streams = getTabData(tabId);
+    const data = Object.fromEntries(streams);
+    const meta = tabMeta.get(tabId) || {};
+    await chrome.storage.session.set({
+      [`tab_${tabId}`]: data,
+      [`meta_${tabId}`]: meta,
+    });
+  } catch {}
 }
 
 async function loadTabData(tabId) {
-  const result = await chrome.storage.session.get([
-    `tab_${tabId}`,
-    `meta_${tabId}`,
-  ]);
-  const data = result[`tab_${tabId}`];
-  const meta = result[`meta_${tabId}`];
-  if (data) {
-    tabStreams.set(tabId, new Map(Object.entries(data)));
-  }
-  if (meta) {
-    tabMeta.set(tabId, meta);
-  }
+  try {
+    const result = await chrome.storage.session.get([
+      `tab_${tabId}`,
+      `meta_${tabId}`,
+    ]);
+    if (result[`tab_${tabId}`]) {
+      tabStreams.set(tabId, new Map(Object.entries(result[`tab_${tabId}`])));
+    }
+    if (result[`meta_${tabId}`]) {
+      tabMeta.set(tabId, result[`meta_${tabId}`]);
+    }
+  } catch {}
+}
+
+function clearTabData(tabId) {
+  tabStreams.delete(tabId);
+  tabHeaders.delete(tabId);
+  tabMeta.delete(tabId);
+  chrome.storage.session.remove([`tab_${tabId}`, `meta_${tabId}`]).catch(() => {});
+  updateBadge(tabId);
 }
 
 // --- Badge ---
@@ -261,8 +336,8 @@ function updateBadge(tabId) {
     if (s.type !== "segment") count++;
   }
   const text = count > 0 ? String(count) : "";
-  chrome.action.setBadgeText({ text, tabId });
-  chrome.action.setBadgeBackgroundColor({ color: "#6C5CE7", tabId });
+  chrome.action.setBadgeText({ text, tabId }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color: "#6C5CE7", tabId }).catch(() => {});
 }
 
 // --- Header Capture ---
@@ -373,10 +448,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 // --- Tab Cleanup ---
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  tabStreams.delete(tabId);
-  tabHeaders.delete(tabId);
-  tabMeta.delete(tabId);
-  chrome.storage.session.remove([`tab_${tabId}`, `meta_${tabId}`]);
+  clearTabData(tabId);
 });
 
 chrome.webNavigation.onCommitted.addListener((details) => {
@@ -386,28 +458,40 @@ chrome.webNavigation.onCommitted.addListener((details) => {
     details.transitionType === "manual_subframe"
   )
     return;
-
   clearTabData(details.tabId);
 });
 
-// SPA navigation (pushState/replaceState) - critical for sites like Skool
+// SPA navigation (pushState/replaceState)
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId !== 0) return;
-  clearTabData(details.tabId);
+  const tabId = details.tabId;
+  const oldUrl = tabUrls.get(tabId);
+  const newUrl = details.url;
+
+  // Only clear if the URL actually changed meaningfully
+  // (ignore hash-only changes)
+  if (oldUrl) {
+    try {
+      const oldPath = new URL(oldUrl).pathname + new URL(oldUrl).search;
+      const newPath = new URL(newUrl).pathname + new URL(newUrl).search;
+      if (oldPath === newPath) return; // Same page, different hash
+    } catch {}
+  }
+
+  tabUrls.set(tabId, newUrl);
+  clearTabData(tabId);
 });
 
-function clearTabData(tabId) {
-  tabStreams.delete(tabId);
-  tabHeaders.delete(tabId);
-  tabMeta.delete(tabId);
-  chrome.storage.session.remove([`tab_${tabId}`, `meta_${tabId}`]);
-  updateBadge(tabId);
-}
+// Track tab URLs
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) {
+    tabUrls.set(tabId, changeInfo.url);
+  }
+});
 
 // --- Message Handling ---
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // --- Get streams for popup ---
   if (message.action === "getStreams") {
     const tabId = message.tabId;
     const streams = tabStreams.get(tabId);
@@ -427,10 +511,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 
-  // --- Add stream from content script ---
   if (message.action === "addStream") {
     const tabId = sender.tab?.id || message.tabId;
     if (tabId && tabId >= 0) {
+      // Update page metadata
       if (message.pageTitle || message.pageThumbnail) {
         if (!tabMeta.has(tabId)) tabMeta.set(tabId, {});
         const meta = tabMeta.get(tabId);
@@ -449,14 +533,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId,
         videoThumbnail: message.videoThumbnail || null,
         duration: message.duration || null,
-        pageTitle: message.pageTitle || null,
-        siteName: message.siteName || null,
       });
     }
     sendResponse({ ok: true });
   }
 
-  // --- Update tab metadata ---
   if (message.action === "updateTabMetadata") {
     const tabId = sender.tab?.id;
     if (tabId && tabId >= 0) {
@@ -467,6 +548,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.pageTitle) meta.pageTitle = message.pageTitle;
       if (message.siteName) meta.siteName = message.siteName;
 
+      // Re-derive names for existing streams with fresh metadata
       const streams = tabStreams.get(tabId);
       if (streams) {
         for (const [url, info] of streams) {
@@ -476,9 +558,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!info.duration && meta.duration) {
             info.duration = meta.duration;
           }
-          if (!info.displayName || info.displayName === "Untitled") {
-            info.displayName = deriveStreamName(url, tabId, info.type);
-          }
+          info.displayName = deriveStreamName(url, tabId, info.type);
         }
         persistTabData(tabId);
       }
@@ -486,34 +566,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
-  // --- Direct download ---
   if (message.action === "download") {
     chrome.downloads.download(
-      {
-        url: message.url,
-        filename: message.filename || undefined,
-      },
-      (downloadId) => {
-        sendResponse({ downloadId });
-      }
+      { url: message.url, filename: message.filename || undefined },
+      (downloadId) => sendResponse({ downloadId })
     );
     return true;
   }
 
-  // --- HLS Probe (quality selection) ---
   if (message.action === "hlsProbe") {
     hlsDownloader
       .probeQualities(message.url, message.referer || "")
-      .then((result) => {
-        sendResponse(result);
-      })
-      .catch((err) => {
-        sendResponse({ error: err.message, isMaster: false, variants: [] });
-      });
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ error: err.message, isMaster: false, variants: [] }));
     return true;
   }
 
-  // --- HLS Download ---
   if (message.action === "hlsDownload") {
     const stream = message.stream;
     hlsDownloader
@@ -526,16 +594,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         filename: stream.displayName || stream.filename || "video.mp4",
         tabId: stream.tabId,
       })
-      .then((downloadId) => {
-        sendResponse({ downloadId });
-      })
-      .catch((err) => {
-        sendResponse({ error: err.message });
-      });
+      .then((downloadId) => sendResponse({ downloadId }))
+      .catch((err) => sendResponse({ error: err.message }));
     return true;
   }
 
-  // --- DASH Download ---
   if (message.action === "dashDownload") {
     const stream = message.stream;
     dashDownloader
@@ -545,16 +608,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         filename: stream.displayName || stream.filename || "video.mp4",
         tabId: stream.tabId,
       })
-      .then((downloadId) => {
-        sendResponse({ downloadId });
-      })
-      .catch((err) => {
-        sendResponse({ error: err.message });
-      });
+      .then((downloadId) => sendResponse({ downloadId }))
+      .catch((err) => sendResponse({ error: err.message }));
     return true;
   }
 
-  // --- Cancel download ---
   if (message.action === "cancelDownload") {
     if (message.downloadId.startsWith("hls_")) {
       hlsDownloader.cancelDownload(message.downloadId);
@@ -564,7 +622,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
-  // --- Get download states ---
   if (message.action === "getDownloadStates") {
     sendResponse({
       hls: hlsDownloader.getAllDownloads(),
@@ -577,6 +634,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.query({}, (tabs) => {
   for (const tab of tabs) {
+    if (tab.url) tabUrls.set(tab.id, tab.url);
     loadTabData(tab.id).then(() => updateBadge(tab.id));
   }
 });

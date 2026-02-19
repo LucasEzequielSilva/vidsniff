@@ -8,18 +8,17 @@
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a|ts)(\?|#|$)/i;
 
-  const BLOCKED = [
-    "stripe.com", "stripe.network", "paypal.com",
-    "googlesyndication.com", "doubleclick.net",
-    "google-analytics.com", "googletagmanager.com",
-    "facebook.net", "sentry.io", "hotjar.com",
-    "intercom.io", "newrelic.com", "nr-data.net",
-    "segment.io", "segment.com", "mixpanel.com",
-  ];
-
   function isBlocked(hostname) {
-    return BLOCKED.some(
-      (d) => hostname === d || hostname.endsWith("." + d)
+    return (
+      hostname.endsWith(".stripe.com") || hostname === "stripe.com" ||
+      hostname.endsWith(".stripe.network") || hostname === "stripe.network" ||
+      hostname.endsWith(".paypal.com") ||
+      hostname.endsWith(".doubleclick.net") ||
+      hostname.endsWith(".googlesyndication.com") ||
+      hostname.endsWith(".google-analytics.com") ||
+      hostname.endsWith(".sentry.io") ||
+      hostname.endsWith(".nr-data.net") ||
+      hostname.endsWith(".newrelic.com")
     );
   }
 

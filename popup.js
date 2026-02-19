@@ -207,7 +207,7 @@ function createStreamItem(stream, type, meta) {
   const metaRow = document.createElement("div");
   metaRow.className = "stream-meta-row";
 
-  const site = stream.siteName || extractDomain(stream.url);
+  const site = stream.streamSite || extractDomain(stream.url);
   if (site) {
     const siteEl = document.createElement("span");
     siteEl.className = "stream-site";

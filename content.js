@@ -7,22 +7,26 @@
   const STREAM_PATTERN =
     /\.(m3u8|mpd|mp4|webm|mkv|avi|mov|flv|wmv|mp3|aac|ogg|flac|m4a)(\?|#|$)/i;
 
-  // Domains that are NOT video sources
-  const BLOCKED_DOMAINS = [
-    "stripe.com", "js.stripe.com", "m.stripe.network", "stripe.network",
-    "paypal.com", "googlesyndication.com", "doubleclick.net",
-    "google-analytics.com", "googletagmanager.com", "facebook.net",
-    "facebook.com", "sentry.io", "hotjar.com", "intercom.io",
-    "crisp.chat", "tawk.to", "newrelic.com", "nr-data.net",
-    "segment.io", "segment.com", "mixpanel.com", "amplitude.com",
-  ];
-
   function isBlockedUrl(url) {
     try {
       const hostname = new URL(url).hostname.toLowerCase();
-      return BLOCKED_DOMAINS.some(
-        (d) => hostname === d || hostname.endsWith("." + d)
-      );
+      // Block stripe and other non-video domains
+      if (
+        hostname.endsWith(".stripe.com") || hostname === "stripe.com" ||
+        hostname.endsWith(".stripe.network") || hostname === "stripe.network" ||
+        hostname.endsWith(".paypal.com") ||
+        hostname.endsWith(".doubleclick.net") ||
+        hostname.endsWith(".googlesyndication.com") ||
+        hostname.endsWith(".google-analytics.com") ||
+        hostname.endsWith(".sentry.io") ||
+        hostname.endsWith(".hotjar.com") ||
+        hostname.endsWith(".intercom.io") ||
+        hostname.endsWith(".nr-data.net") ||
+        hostname.endsWith(".newrelic.com")
+      ) {
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
